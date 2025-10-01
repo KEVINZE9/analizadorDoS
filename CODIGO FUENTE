@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analizador en tiempo real de Detección DoS</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ecf0f1;
+            min-height: 100vh;
+        }
+
+        . header {
+            background: rgba (0, 0, 0, 0.3);
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba (0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+        }
+
+        . header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba (0, 0, 0, 0.7);
+        }
+
+        . connection-status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        .status-connected {
+            background: rgba(39, 174, 96, 0.3);
+            border: 2px solid #27ae60;
+        }
+
+        .status-disconnected {
+            background: rgba(231, 76, 60, 0.3);
+            border: 2px solid #e74c3c;
+        }
+
+        .status-connecting {
+            background: rgba(243, 156, 18, 0.3);
+            border: 2px solid #f39c12;
+        }
+
+        .dashboard {
+            padding: 20px;
+            margin: 20px;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .metric-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .metric-label {
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            opacity: 0.8;
+        }
+
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .real-time-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #27ae60;
+            border-radius: 50%;
+            margin-left: 10px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .control-panel {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 30px 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-connect { background: #27ae60; color: white; }
+        .btn-disconnect { background: #e74c3c; color: white; }
+        .btn-test { background: #f39c12; color: white; }
+        .btn-config { background: #3498db; color: white; }
+        .btn-export { background: #9b59b6; color: white; }
+
+        .tabs {
+            display: flex;
+            justify-content: center;
+            margin: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .tab {
+            padding: 15px 30px;
+            background: rgba(255, 255, 255, 0.05);
+            color: #ecf0f1;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            flex: 1;
+        }
+
+        .tab.active {
+            background: rgba(52, 152, 219, 0.3);
+            border-bottom: 3px solid #3498db;
+        }
+
+        .tab:hover {
+            background: rgba(52, 152, 219, 0.2);
+        }
+
+        .tab-content {
+            display: none;
+            margin: 20px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .chart-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            height: 400px;
+        }
+
+        .alerts-section {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .alerts-container {
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .alert-entry {
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .alert-HIGH, .alert-CRITICAL {
+            background: rgba(231, 76, 60, 0.2);
+            border-left: 4px solid #e74c3c;
+            color: #ff6b6b;
+        }
+
+        .alert-MEDIUM {
+            background: rgba(243, 156, 18, 0.2);
+            border-left: 4px solid #f39c12;
+            color: #ffd93d;
+        }
+
+        .alert-LOW, .alert-INFO {
+            background: rgba(52, 152, 219, 0.2);
+            border-left: 4px solid #3498db;
+            color: #74b9ff;
+        }
+
+        .alert-SUCCESS {
+            background: rgba(39, 174, 96, 0.2);
+            border-left: 4px solid #27ae60;
+            color: #2ecc71;
+        }
+
+        .info-box {
+            background: rgba(52, 152, 219, 0.2);
+            border: 2px solid #3498db;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px;
+        }
+
+        .info-box h3 {
+            margin-bottom: 10px;
+            color: #3498db;
+        }
+
+        .info-box code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .diagnostic-panel {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .diagnostic-item {
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .diagnostic-success {
+            background: rgba(39, 174, 96, 0.2);
+            color: #2ecc71;
+        }
+
+        .diagnostic-error {
+            background: rgba (231, 76, 60, 0.2);
+            color: #e74c3c;
+        }
+
+        .diagnostic-warning {
+            background: rgba(243, 156, 18, 0.2);
+            color: #f39c12;
+        }
+
+        .packet-flow {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+        }
+
+        .packet-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            animation: fadeIn 0.5s ease;
+            font-size: 0.85rem;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .config-modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            min-width: 400px;
+        }
+
+        .config-modal h3 {
+            margin-bottom: 20px;
+            color: #3498db;
+        }
+
+        .config-item {
+            margin-bottom: 15px;
+        }
+
+        .config-item label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .config-item input {
+            width: 100%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 2px solid #3498db;
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 999;
+        }
+
+        .protocol-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .protocol-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 2px solid;
+            transition: all 0.3s ease;
+        }
+
+        .protocol-tcp { border-color: #3498db; }
+        .protocol-udp { border-color: #f39c12; }
+        .protocol-icmp { border-color: #e74c3c; }
+        .protocol-bandwidth { border-color: #27ae60; }
+
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.8rem; }
+            .metrics-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+            .control-panel { flex-direction: column; align-items: center; }
+            .tabs { flex-direction: column; }
+            .chart-container { height: 300px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ Analizador en tiempo real de Detección DoS</h1>
+        <div class="connection-status status-disconnected" id="connectionStatus">
+            ⚠️ DESCONECTADO DEL BACKEND
+        </div>
+    </div>
+
+    <div class="info-box">
+        <div>
+                <h2 style="margin: 0; color: #27ae60; font-size: 1.4rem; font-weight: bold;">UNIVERSIDAD TÉCNICA ESTATAL DE QUEVEDO</h2>
+                <p style="margin: 0; color: #f39c12; font-size: 0.9rem;">ECUADOR - 1984</p>
+            </div>
+        <p><strong>Proyecto desarrollado por el estudiante: </strong>  <code>Zambrano Enriquez Kevin Javier</code></p>
+        <p><strong>Prototipo académico para detección de ataques DoS en redes locales</p>
+        <p><strong>¡Mantén tu red siempre protegida!</p>
+        <p><strong>Nuestro detector analiza el tráfico en tiempo real y frena los ataques DoS antes de que interrumpan tu entorno seguro</p>
+    </div>
+
+    <div class="diagnostic-panel" id="diagnosticPanel">
+        <h3>🔍 Panel de Diagnóstico</h3>
+        <div id="diagnosticResults">
+            <div class="diagnostic-item diagnostic-warning">🔄 Esperando test de conexión...</div>
+        </div>
+    </div>
+
+    <div class="control-panel">
+        <button class="btn btn-test" onclick="testConnection()">TEST CONEXIÓN</button>
+        <button class="btn btn-connect" id="connectBtn" onclick="connectToBackend()" disabled>CONECTAR AL BACKEND</button>
+        <button class="btn btn-disconnect" id="disconnectBtn" onclick="disconnectFromBackend()" disabled>DESCONECTAR</button>
+        <button class="btn btn-config" onclick="openConfig()">CONFIGURAR</button>
+        <button class="btn btn-export" onclick="exportData()">EXPORTAR DATOS</button>
+    </div>
+
+    <div class="dashboard">
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Paquetes Totales</div>
+                <div class="metric-value" style="color: #3498db;" id="totalPackets">0</div>
+                <span class="real-time-indicator" id="packetsIndicator" style="display: none;"></span>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Amenazas Detectadas</div>
+                <div class="metric-value" style="color: #e74c3c;" id="totalThreats">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">IPs Bloqueadas</div>
+                <div class="metric-value" style="color: #f39c12;" id="totalBlocked">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">TCP</div>
+                <div class="metric-value" style="color: #3498db;" id="tcpPackets">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">UDP</div>
+                <div class="metric-value" style="color: #f39c12;" id="udpPackets">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">ICMP</div>
+                <div class="metric-value" style="color: #e74c3c;" id="icmpPackets">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Ancho de Banda</div>
+                <div class="metric-value" style="color: #9b59b6;" id="bandwidth">0 KB/s</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Tiempo Activo</div>
+                <div class="metric-value" style="color: #27ae60;" id="uptime">00:00:00</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pestañas -->
+    <div class="tabs">
+        <button class="tab active" onclick="openTab(event, 'realTimeTab')">TIEMPO REAL</button>
+        <button class="tab" onclick="openTab(event, 'analysisTab')">ANÁLISIS</button>
+        <button class="tab" onclick="openTab(event, 'alertsTab')">ALERTAS</button>
+    </div>
+
+    <!-- Tab: Tiempo Real -->
+    <div id="realTimeTab" class="tab-content active">
+        <div class="chart-container">
+            <canvas id="trafficChart"></canvas>
+        </div>
+        
+        <div class="packet-flow" id="packetFlowSection">
+            <h3>📊 Flujo de Paquetes en Tiempo Real</h3>
+            <div id="packetFlow">
+                <div class="packet-item">
+                    <span>Esperando datos...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab: Análisis -->
+    <div id="analysisTab" class="tab-content">
+        <div class="protocol-stats">
+            <div class="protocol-card protocol-tcp">
+                <div style="font-weight: bold;">TCP</div>
+                <div style="font-size: 1.5rem; margin-top: 10px;" id="tcpCurrent">0</div>
+                <div style="font-size: 0.8rem; opacity: 0.7;">paquetes/seg</div>
+            </div>
+            <div class="protocol-card protocol-udp">
+                <div style="font-weight: bold;">UDP</div>
+                <div style="font-size: 1.5rem; margin-top: 10px;" id="udpCurrent">0</div>
+                <div style="font-size: 0.8rem; opacity: 0.7;">paquetes/seg</div>
+            </div>
+            <div class="protocol-card protocol-icmp">
+                <div style="font-weight: bold;">ICMP</div>
+                <div style="font-size: 1.5rem; margin-top: 10px;" id="icmpCurrent">0</div>
+                <div style="font-size: 0.8rem; opacity: 0.7;">paquetes/seg</div>
+            </div>
+            <div class="protocol-card protocol-bandwidth">
+                <div style="font-weight: bold;">Ancho de Banda</div>
+                <div style="font-size: 1.5rem; margin-top: 10px;" id="bandwidthCurrent">0 KB/s</div>
+                <div style="font-size: 0.8rem; opacity: 0.7;">actual</div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <canvas id="dosChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Tab: Alertas -->
+    <div id="alertsTab" class="tab-content">
+        <div class="alerts-section">
+            <h3>🚨 Registro de Eventos y Alertas</h3>
+            <div class="alerts-container" id="alertsContainer">
+                <div class="alert-entry alert-INFO">Sistema inicializado. Esperando conexión...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Configuración -->
+    <div class="modal-overlay" id="modalOverlay" onclick="closeConfig()"></div>
+    <div class="config-modal" id="configModal">
+        <h3>⚙️ Configuración de Umbrales</h3>
+        <div class="config-item">
+            <label>Paquetes por segundo:</label>
+            <input type="number" id="configPackets" value="100" min="10" max="1000">
+        </div>
+        <div class="config-item">
+            <label>Conexiones por IP:</label>
+            <input type="number" id="configConnections" value="50" min="10" max="500">
+        </div>
+        <div class="config-item">
+            <label>Umbral SYN Flood:</label>
+            <input type="number" id="configSyn" value="30" min="10" max="200">
+        </div>
+        <div class="config-item">
+            <label>Umbral UDP Flood:</label>
+            <input type="number" id="configUdp" value="50" min="10" max="300">
+        </div>
+        <div class="config-item">
+            <label>Umbral ICMP Flood:</label>
+            <input type="number" id="configIcmp" value="20" min="5" max="100">
+        </div>
+        <button class="btn btn-config" onclick="saveConfig()">GUARDAR CONFIGURACIÓN</button>
+    </div>
+
+    <script>
+        // Variables globales
+        let ws = null;
+        let connected = false;
+        let trafficChart = null;
+        let dosChart = null;
+        let startTime = null;
+        let chartData = {
+            labels: [],
+            tcp: [],
+            udp: [],
+            icmp: [],
+            total: []
+        };
+        let packetBuffer = [];
+        let stats = {
+            total_packets: 0,
+            total_threats: 0,
+            total_blocked: 0,
+            tcp_packets: 0,
+            udp_packets: 0,
+            icmp_packets: 0,
+            bandwidth: 0
+        };
+
+        // Configuración del backend
+        const BACKEND_HOST = 'localhost';
+        const BACKEND_PORT = '8000';
+        const API_URL = `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+        const WS_URL = `ws://${BACKEND_HOST}:${BACKEND_PORT}/ws`;
+
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Sistema inicializado');
+            initializeCharts();
+            addLog('INFO', 'Frontend cargado correctamente');
+            updateUptime();
+            // Test automático inicial
+            setTimeout(testConnection, 1000);
+        });
+
+        // Gestión de pestañas
+        function openTab(evt, tabName) {
+            const tabcontent = document.getElementsByClassName("tab-content");
+            for (let i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].classList.remove("active");
+            }
+            
+            const tablinks = document.getElementsByClassName("tab");
+            for (let i = 0; i < tablinks.length; i++) {
+                tablinks[i].classList.remove("active");
+            }
+            
+            document.getElementById(tabName).classList.add("active");
+            evt.currentTarget.classList.add("active");
+        }
+
+        // Función de logging
+        function addLog(level, message) {
+            console.log(`[${level}] ${message}`);
+            const timestamp = new Date().toLocaleTimeString();
+            addAlert(level, `${message}`, timestamp);
+        }
+
+        // Test de conexión con diagnóstico detallado
+        async function testConnection() {
+            const diagnosticResults = document.getElementById('diagnosticResults');
+            diagnosticResults.innerHTML = '<div class="diagnostic-item diagnostic-warning">🔄 Ejecutando diagnóstico...</div>';
+            
+            let results = [];
+            
+            // Test 1: Verificar que el navegador soporta WebSocket
+            try {
+                if ('WebSocket' in window) {
+                    results.push({ status: 'success', message: '✅ WebSocket soportado por el navegador' });
+                } else {
+                    results.push({ status: 'error', message: '❌ WebSocket NO soportado' });
+                }
+            } catch (e) {
+                results.push({ status: 'error', message: `❌ Error verificando WebSocket: ${e.message}` });
+            }
+            
+            // Test 2: Verificar conectividad HTTP con el backend
+            try {
+                addLog('INFO', `Probando conexión HTTP a ${API_URL}`);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                
+                const response = await fetch(API_URL, {
+                    method: 'GET',
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    results.push({ status: 'success', message: `✅ Backend HTTP accesible: ${data.message}` });
+                    
+                    if (data.interfaces && data.interfaces.length > 0) {
+                        results.push({ status: 'success', message: `✅ Interfaces de red detectadas: ${data.interfaces.join(', ')}` });
+                    }
+                    
+                    // Habilitar botón de conexión si el backend está disponible
+                    document.getElementById('connectBtn').disabled = false;
+                } else {
+                    results.push({ status: 'error', message: `❌ Backend respondió con error: ${response.status}` });
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    results.push({ status: 'error', message: '❌ Timeout: El backend no responde (¿está ejecutándose?)' });
+                } else {
+                    results.push({ status: 'error', message: `❌ No se puede conectar al backend: ${error.message}` });
+                    results.push({ status: 'warning', message: '⚠️ Verifica que el backend esté ejecutándose con: sudo python3 dos_detector.py' });
+                }
+                document.getElementById('connectBtn').disabled = true;
+            }
+            
+            // Test 3: Verificar que no hay problemas CORS
+            try {
+                results.push({ status: 'success', message: '✅ CORS configurado correctamente' });
+            } catch (e) {
+                results.push({ status: 'warning', message: '⚠️ Posibles problemas con CORS' });
+            }
+            
+            // Mostrar resultados del diagnóstico
+            diagnosticResults.innerHTML = results.map(r => 
+                `<div class="diagnostic-item diagnostic-${r.status}">
+                    ${r.message}
+                </div>`
+            ).join('');
+            
+            // Si todo está bien, sugerir conectar
+            const allSuccess = results.every(r => r.status === 'success');
+            if (allSuccess) {
+                addLog('SUCCESS', 'Todos los tests pasaron. Puedes conectarte al backend.');
+            }
+        }
+
+        // Conectar al backend
+        function connectToBackend() {
+            if (connected) {
+                addLog('WARNING', 'Ya estás conectado');
+                return;
+            }
+            
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = 'connection-status status-connecting';
+            statusEl.innerHTML = '🔄 CONECTANDO... <span class="spinner"></span>';
+            
+            addLog('INFO', `Intentando conectar a WebSocket: ${WS_URL}`);
+            
+            try {
+                ws = new WebSocket(WS_URL);
+                
+                ws.onopen = function(event) {
+                    connected = true;
+                    startTime = new Date();
+                    addLog('SUCCESS', '✅ CONECTADO AL BACKEND - CAPTURANDO TRÁFICO REAL');
+                    updateConnectionStatus(true);
+                    document.getElementById('connectBtn').disabled = true;
+                    document.getElementById('disconnectBtn').disabled = false;
+                    document.getElementById('packetsIndicator').style.display = 'inline-block';
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const message = JSON.parse(event.data);
+                        handleWebSocketMessage(message);
+                    } catch (error) {
+                        console.error('Error procesando mensaje:', error);
+                        addLog('ERROR', `Error procesando mensaje: ${error.message}`);
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    addLog('ERROR', 'Error de WebSocket - Verifica que el backend esté ejecutándose');
+                    updateConnectionStatus(false);
+                };
+                
+                ws.onclose = function(event) {
+                    connected = false;
+                    startTime = null;
+                    addLog('INFO', `WebSocket cerrado: código ${event.code}, razón: ${event.reason || 'Sin razón'}`);
+                    updateConnectionStatus(false);
+                    document.getElementById('connectBtn').disabled = false;
+                    document.getElementById('disconnectBtn').disabled = true;
+                    document.getElementById('packetsIndicator').style.display = 'none';
+                    ws = null;
+                };
+                
+            } catch (error) {
+                console.error('Error creando WebSocket:', error);
+                addLog('ERROR', `Error creando WebSocket: ${error.message}`);
+                updateConnectionStatus(false);
+            }
+        }
+
+        // Desconectar del backend
+        function disconnectFromBackend() {
+            if (ws) {
+                addLog('INFO', 'Desconectando del backend...');
+                ws.close();
+                ws = null;
+            }
+        }
+
+        // Manejar mensajes del WebSocket
+        function handleWebSocketMessage(message) {
+            console.log('Mensaje recibido:', message.type);
+            
+            switch(message.type) {
+                case 'connected':
+                    addLog('SUCCESS', 'Conexión establecida con el backend');
+                    if (message.stats) {
+                        stats = message.stats;
+                        updateMetrics();
+                    }
+                    if (message.alerts) {
+                        message.alerts.forEach(alert => {
+                            addAlert(alert.severity, alert.message);
+                        });
+                    }
+                    break;
+                    
+                case 'update':
+                    if (message.data) {
+                        processPacketData(message.data);
+                    }
+                    break;
+                    
+                case 'alert':
+                    if (message.data) {
+                        addAlert(message.data.severity, message.data.message);
+                    }
+                    break;
+                    
+                default:
+                    console.log('Mensaje desconocido:', message);
+            }
+        }
+
+        // Procesar datos de paquetes
+        function processPacketData(data) {
+            // Actualizar estadísticas
+            if (data.stats) {
+                stats = data.stats;
+                updateMetrics();
+            }
+            
+            // Agregar a buffer de paquetes
+            if (data.src_ip && data.dst_ip) {
+                packetBuffer.unshift({
+                    time: new Date(data.timestamp).toLocaleTimeString(),
+                    src: data.src_ip,
+                    dst: data.dst_ip,
+                    protocol: data.protocol || 'Unknown',
+                    size: data.size || 0
+                });
+                
+                // Limitar buffer
+                if (packetBuffer.length > 10) {
+                    packetBuffer = packetBuffer.slice(0, 10);
+                }
+                
+                updatePacketFlow();
+            }
+            
+            updateCharts();
+            
+            // Hacer parpadear el indicador
+            const indicator = document.getElementById('packetsIndicator');
+            if (indicator) {
+                indicator.style.background = '#e74c3c';
+                setTimeout(() => {
+                    indicator.style.background = '#27ae60';
+                }, 100);
+            }
+        }
+
+        // Actualizar flujo de paquetes
+        function updatePacketFlow() {
+            const container = document.getElementById('packetFlow');
+            if (container && packetBuffer.length > 0) {
+                container.innerHTML = packetBuffer.map(packet => `
+                    <div class="packet-item">
+                        <span>⏰ ${packet.time}</span>
+                        <span>📍 ${packet.src} → ${packet.dst}</span>
+                        <span>🔧 ${packet.protocol}</span>
+                        <span>📦 ${packet.size} bytes</span>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Actualizar métricas
+        function updateMetrics() {
+            document.getElementById('totalPackets').textContent = stats.total_packets.toLocaleString();
+            document.getElementById('totalThreats').textContent = stats.total_threats;
+            document.getElementById('totalBlocked').textContent = stats.total_blocked;
+            document.getElementById('tcpPackets').textContent = stats.tcp_packets;
+            document.getElementById('udpPackets').textContent = stats.udp_packets;
+            document.getElementById('icmpPackets').textContent = stats.icmp_packets;
+            document.getElementById('bandwidth').textContent = stats.bandwidth + ' KB/s';
+            
+            // Actualizar también en la pestaña de análisis
+            document.getElementById('tcpCurrent').textContent = stats.tcp_packets;
+            document.getElementById('udpCurrent').textContent = stats.udp_packets;
+            document.getElementById('icmpCurrent').textContent = stats.icmp_packets;
+            document.getElementById('bandwidthCurrent').textContent = stats.bandwidth + ' KB/s';
+        }
+
+        // Actualizar tiempo activo
+        function updateUptime() {
+            if (startTime && connected) {
+                const uptime = new Date() - startTime;
+                const hours = Math.floor(uptime / 3600000);
+                const minutes = Math.floor((uptime % 3600000) / 60000);
+                const seconds = Math.floor((uptime % 60000) / 1000);
+                document.getElementById('uptime').textContent = 
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+            setTimeout(updateUptime, 1000);
+        }
+
+        // Inicializar gráficos
+        function initializeCharts() {
+            // Gráfico de tráfico en tiempo real
+            const trafficCtx = document.getElementById('trafficChart').getContext('2d');
+            trafficChart = new Chart(trafficCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'TCP',
+                            data: [],
+                            borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'UDP',
+                            data: [],
+                            borderColor: '#f39c12',
+                            backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'ICMP',
+                            data: [],
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Tráfico de Red en Tiempo Real (Captura Real)',
+                            font: { size: 18, weight: 'bold' },
+                            color: '#2c3e50'
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: { color: '#2c3e50' }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Paquetes/segundo',
+                                color: '#2c3e50'
+                            },
+                            ticks: { color: '#2c3e50' }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Tiempo',
+                                color: '#2c3e50'
+                            },
+                            ticks: {
+                                color: '#2c3e50',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    },
+                    animation: { duration: 0 }
+                }
+            });
+
+            // Gráfico de detección DoS
+            const dosCtx = document.getElementById('dosChart').getContext('2d');
+            dosChart = new Chart(dosCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Tráfico Total',
+                            data: [],
+                            borderColor: '#27ae60',
+                            backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                            borderWidth: 3,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Umbral DoS',
+                            data: [],
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            borderWidth: 2,
+                            borderDash: [10, 5],
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Sistema de Detección de Ataques DoS',
+                            font: { size: 18, weight: 'bold' },
+                            color: '#2c3e50'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Paquetes Totales/segundo',
+                                color: '#2c3e50'
+                            },
+                            ticks: { color: '#2c3e50' }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Tiempo',
+                                color: '#2c3e50'
+                            },
+                            ticks: {
+                                color: '#2c3e50',
+                                maxRotation: 45,
+                                minRotation: 45
+                            }
+                        }
+                    },
+                    animation: { duration: 0 }
+                }
+            });
+        }
+
+        // Actualizar gráficos
+        function updateCharts() {
+            if (!trafficChart || !dosChart) return;
+            
+            const time = new Date().toLocaleTimeString();
+            const total = stats.tcp_packets + stats.udp_packets + stats.icmp_packets;
+            
+            // Agregar nueva data
+            chartData.labels.push(time);
+            chartData.tcp.push(stats.tcp_packets);
+            chartData.udp.push(stats.udp_packets);
+            chartData.icmp.push(stats.icmp_packets);
+            chartData.total.push(total);
+            
+            // Limitar a últimos 30 puntos
+            const maxPoints = 30;
+            if (chartData.labels.length > maxPoints) {
+                chartData.labels.shift();
+                chartData.tcp.shift();
+                chartData.udp.shift();
+                chartData.icmp.shift();
+                chartData.total.shift();
+            }
+            
+            // Actualizar gráfico de tráfico
+            trafficChart.data.labels = [...chartData.labels];
+            trafficChart.data.datasets[0].data = [...chartData.tcp];
+            trafficChart.data.datasets[1].data = [...chartData.udp];
+            trafficChart.data.datasets[2].data = [...chartData.icmp];
+            trafficChart.update('none');
+            
+            // Actualizar gráfico DoS
+            const threshold = parseInt(document.getElementById('configPackets').value) || 100;
+            const thresholdData = new Array(chartData.labels.length).fill(threshold);
+            
+            dosChart.data.labels = [...chartData.labels];
+            dosChart.data.datasets[0].data = [...chartData.total];
+            dosChart.data.datasets[1].data = thresholdData;
+            dosChart.update('none');
+        }
+
+        // Agregar alerta
+        function addAlert(severity, message, timestamp = null) {
+            const container = document.getElementById('alertsContainer');
+            const time = timestamp || new Date().toLocaleTimeString();
+            
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert-entry alert-${severity}`;
+            alertDiv.innerHTML = `[${time}] [${severity}] ${message}`;
+            
+            container.appendChild(alertDiv);
+            container.scrollTop = container.scrollHeight;
+            
+            // Limitar número de alertas
+            while (container.children.length > 100) {
+                container.removeChild(container.firstChild);
+            }
+        }
+
+        // Actualizar estado de conexión
+        function updateConnectionStatus(isConnected) {
+            const status = document.getElementById('connectionStatus');
+            if (isConnected) {
+                status.className = 'connection-status status-connected';
+                status.innerHTML = '✅ CONECTADO - CAPTURANDO TRÁFICO REAL <span class="real-time-indicator"></span>';
+            } else {
+                status.className = 'connection-status status-disconnected';
+                status.innerHTML = '⚠️ DESCONECTADO DEL BACKEND';
+            }
+        }
+
+        // Configuración
+        function openConfig() {
+            document.getElementById('modalOverlay').style.display = 'block';
+            document.getElementById('configModal').style.display = 'block';
+        }
+
+        function closeConfig() {
+            document.getElementById('modalOverlay').style.display = 'none';
+            document.getElementById('configModal').style.display = 'none';
+        }
+
+        async function saveConfig() {
+            const config = {
+                packets_per_second: parseInt(document.getElementById('configPackets').value),
+                connections_per_ip: parseInt(document.getElementById('configConnections').value),
+                syn_flood_threshold: parseInt(document.getElementById('configSyn').value),
+                udp_flood_threshold: parseInt(document.getElementById('configUdp').value),
+                icmp_flood_threshold: parseInt(document.getElementById('configIcmp').value)
+            };
+            
+            try {
+                const response = await fetch(`${API_URL}/config`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(config)
+                });
+                
+                if (response.ok) {
+                    addAlert('SUCCESS', 'Configuración actualizada correctamente');
+                    closeConfig();
+                }
+            } catch (error) {
+                console.error('Error actualizando configuración:', error);
+                addAlert('CRITICAL', 'Error al actualizar configuración');
+            }
+        }
+
+        // Exportar datos
+        function exportData() {
+            const exportData = {
+                timestamp: new Date().toISOString(),
+                stats: stats,
+                packets: packetBuffer,
+                chartData: chartData,
+                config: {
+                    packets_per_second: document.getElementById('configPackets').value,
+                    connections_per_ip: document.getElementById('configConnections').value,
+                    syn_flood_threshold: document.getElementById('configSyn').value,
+                    udp_flood_threshold: document.getElementById('configUdp').value,
+                    icmp_flood_threshold: document.getElementById('configIcmp').value
+                }
+            };
+            
+            const dataStr = JSON.stringify(exportData, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(dataBlob);
+            link.download = `dos_capture_real_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.json`;
+            link.click();
+            
+            addLog('INFO', 'Datos exportados correctamente');
+        }
+
+        // Verificar estado del backend periódicamente
+        setInterval(() => {
+            if (!connected) {
+                // Solo hacer ping si no estamos conectados
+                fetch(API_URL)
+                    .then(response => {
+                        if (response.ok) {
+                            document.getElementById('connectBtn').disabled = false;
+                        }
+                    })
+                    .catch(() => {
+                        document.getElementById('connectBtn').disabled = true;
+                    });
+            }
+        }, 5000);
+
+        // Manejo de errores globales
+        window.addEventListener('error', function(e) {
+            console.error('Error global:', e);
+            addLog('ERROR', `Error: ${e.message}`);
+        });
+
+        // Prevenir cierre accidental si hay conexión activa
+        window.addEventListener('beforeunload', function(e) {
+            if (connected) {
+                e.preventDefault();
+                e.returnValue = '¿Estás seguro? La conexión con el backend se perderá.';
+            }
+        });
+
+        console.log('Sistema de Detección DoS v2.0 - Listo para captura real de tráfico');
+    </script>
+</body>
+</html>
+Código fuente: página Web con interfaz dinámica del Analizador de tráfico de red para detectar ataques DoS
+#!/usr/bin/env python3
+"""
+Backend simplificado para el Sistema de Detección DoS
+Versión que funciona sin permisos root para pruebas
+"""
+
+import asyncio
+import json
+import random
+import time
+from datetime import datetime
+from collections import deque
+from typing import Set
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+
+# Crear aplicación FastAPI
+app = FastAPI(title="DoS Detector API")
+
+# Configurar CORS - MUY IMPORTANTE
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permitir todos los orígenes
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Variables globales
+websocket_clients: Set[WebSocket] = set()
+alerts = deque(maxlen=100)
+stats = {
+    'total_packets': 0,
+    'total_threats': 0,
+    'total_blocked': 0,
+    'tcp_packets': 0,
+    'udp_packets': 0,
+    'icmp_packets': 0,
+    'bandwidth': 0,
+    'current_connections': 0
+}
+
+# Configuración
+config = {
+    'packets_per_second': 100,
+    'connections_per_ip': 50,
+    'syn_flood_threshold': 30,
+    'udp_flood_threshold': 50,
+    'icmp_flood_threshold': 20
+}
+
+@app.get("/")
+async def root():
+    """Endpoint principal"""
+    return {
+        "status": "online",
+        "message": "DoS Detector Backend v1.0",
+        "interfaces": ["eth0", "wlan0", "lo"],  # Interfaces simuladas
+        "stats": stats
+    }
+
+@app.get("/stats")
+async def get_stats():
+    """Obtiene estadísticas actuales"""
+    return stats
+
+@app.get("/alerts")
+async def get_alerts():
+    """Obtiene las últimas alertas"""
+    return list(alerts)
+
+@app.post("/config")
+async def update_config(new_config: dict):
+    """Actualiza la configuración"""
+    config.update(new_config)
+    return {"status": "updated", "config": config}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket para actualizaciones en tiempo real"""
+    await websocket.accept()
+    websocket_clients.add(websocket)
+    print(f"Cliente WebSocket conectado. Total: {len(websocket_clients)}")
+    
+    try:
+        # Enviar estado inicial
+        await websocket.send_text(json.dumps({
+            'type': 'connected',
+            'stats': stats,
+            'alerts': list(alerts)[-5:] if alerts else []
+        }))
+        
+        # Mantener conexión abierta
+        while True:
+            # Recibir mensajes del cliente (para mantener la conexión viva)
+            data = await websocket.receive_text()
+            
+    except WebSocketDisconnect:
+        websocket_clients.remove(websocket)
+        print(f"Cliente WebSocket desconectado. Total: {len(websocket_clients)}")
+    except Exception as e:
+        print(f"Error en WebSocket: {e}")
+        if websocket in websocket_clients:
+            websocket_clients.remove(websocket)
+
+async def simulate_traffic():
+    """Simula tráfico de red para pruebas"""
+    while True:
+        await asyncio.sleep(1)
+        
+        # Simular paquetes
+        tcp = random.randint(10, 50)
+        udp = random.randint(5, 30)
+        icmp = random.randint(0, 10)
+        
+        # Simular ataque ocasional
+        if random.random() < 0.1:  # 10% de probabilidad
+            attack_type = random.choice(['tcp', 'udp', 'icmp'])
+            if attack_type == 'tcp':
+                tcp = random.randint(100, 200)
+                await create_alert('HIGH', f'Posible SYN Flood detectado: {tcp} paquetes/s')
+                stats['total_threats'] += 1
+            elif attack_type == 'udp':
+                udp = random.randint(80, 150)
+                await create_alert('HIGH', f'Posible UDP Flood detectado: {udp} paquetes/s')
+                stats['total_threats'] += 1
+            else:
+                icmp = random.randint(30, 60)
+                await create_alert('MEDIUM', f'Posible ICMP Flood detectado: {icmp} paquetes/s')
+                stats['total_threats'] += 1
+        
+        # Actualizar estadísticas
+        stats['tcp_packets'] = tcp
+        stats['udp_packets'] = udp
+        stats['icmp_packets'] = icmp
+        stats['total_packets'] += tcp + udp + icmp
+        stats['bandwidth'] = random.randint(50, 200)
+        
+        # Enviar actualización a clientes WebSocket
+        update_data = {
+            'type': 'update',
+            'data': {
+                'timestamp': datetime.now().isoformat(),
+                'src_ip': f"192.168.1.{random.randint(1, 254)}",
+                'dst_ip': f"10.0.0.{random.randint(1, 254)}",
+                'protocol': random.choice(['TCP', 'UDP', 'ICMP']),
+                'size': random.randint(64, 1500),
+                'stats': stats
+            }
+        }
+        
+        await broadcast_to_clients(update_data)
+
+async def create_alert(severity: str, message: str):
+    """Crea una alerta"""
+    alert = {
+        'timestamp': datetime.now().isoformat(),
+        'severity': severity,
+        'message': message,
+        'id': len(alerts)
+    }
+    alerts.append(alert)
+    
+    # Enviar alerta a clientes
+    await broadcast_to_clients({
+        'type': 'alert',
+        'data': alert
+    })
+
+async def broadcast_to_clients(data: dict):
+    """Envía datos a todos los clientes WebSocket conectados"""
+    if websocket_clients:
+        message = json.dumps(data)
+        disconnected = set()
+        
+        for client in websocket_clients:
+            try:
+                await client.send_text(message)
+            except:
+                disconnected.add(client)
+        
+        # Eliminar clientes desconectados
+        for client in disconnected:
+            websocket_clients.remove(client)
+
+@app.on_event("startup")
+async def startup_event():
+    """Inicia la simulación al arrancar el servidor"""
+    asyncio.create_task(simulate_traffic())
+    print("Sistema de simulación iniciado")
+
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("SISTEMA DE DETECCIÓN DoS - BACKEND")
+    print("="*60)
+    print("\n✅ Modo: SIMULACIÓN (no requiere permisos root)")
+    print("📡 Iniciando servidor...")
+    print("🌐 API disponible en: http://localhost:8000")
+    print("🔌 WebSocket en: ws://localhost:8000/ws")
+    print("\n📝 Endpoints disponibles:")
+    print("  - GET  http://localhost:8000/       (Estado)")
+    print("  - GET  http://localhost:8000/stats  (Estadísticas)")
+    print("  - GET  http://localhost:8000/alerts (Alertas)")
+    print("  - POST http://localhost:8000/config (Configuración)")
+    print("  - WS   ws://localhost:8000/ws       (WebSocket)")
+    print("\nPresiona Ctrl+C para detener\n")
+    print("="*60 + "\n")
+    
+    # Ejecutar servidor
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        log_level="info"
+    )
